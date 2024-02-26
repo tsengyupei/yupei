@@ -1,1 +1,1 @@
-Bioinformatic data and the data for statistical analysis.
+Data for statistical analysis.
