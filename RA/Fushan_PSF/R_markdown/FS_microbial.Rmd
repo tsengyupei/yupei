@@ -1,0 +1,333 @@
+---
+title: "Fushan Plant-Soil Feedback Microbial Data Analysis"
+author: "Yu-Pei Tseng"
+date: "December 2023"
+output:
+  html_document:
+    code_folding: show
+---
+```{r warning = FALSE, message = FALSE}
+#Importing packages
+library(phyloseq)
+library(RColorBrewer)
+library(randomcoloR)
+library(ggplot2)
+library(ggpubr)
+library(dplyr)
+library(vegan)
+library(tidyr)
+library(rstatix)
+library(pairwiseAdonis)
+library(xtable)
+```
+### Data preparation
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+#Function for loading r data that can directly be assigned by a new name
+loadRData <- function(fileName){
+#loads an RData file, and returns it
+    load(fileName)
+    get(ls()[ls() != "fileName"])
+}
+```
+
+##### 1. Fungal data preparation
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+#Importing fungal data
+#The table of tracking reads through the pipeline
+track_f <- loadRData('/Users/yupeitseng/Documents/RA/FS_PSF/Microbes/track_fungi.RData')
+#OTU table
+OTU_f <- loadRData('/Users/yupeitseng/Documents/RA/FS_PSF/Microbes/OTU_table_fungi.RData')
+#Taxonomy table
+taxa_f <- loadRData('/Users/yupeitseng/Documents/RA/FS_PSF/Microbes/taxa_fungi.RData')
+#Sample information
+samdf_f <- read.csv('/Users/yupeitseng/Documents/RA/FS_PSF/Microbes/sample_data.csv', header = T)
+
+#Changing data format for futher phyloseq object construction
+samples.out <- as.data.frame(rownames(OTU_f))
+samples.out$sample_ID <- sub('-ITS_R1.fastq.gz.*', '', rownames(OTU_f))
+samdf_f <- left_join(samples.out, samdf_f, by = "sample_ID")
+rownames(samdf_f) <- samdf_f[, 2]
+samdf_f <- samdf_f[, -1]
+rownames(OTU_f) <- samples.out$sample_ID
+
+ps_f <- phyloseq(otu_table(OTU_f, taxa_are_rows = F), 
+               sample_data(samdf_f), 
+               tax_table(taxa_f))
+
+ps_f <- prune_samples(!(sample_names(ps_f) %in% c("M24")), ps_f) #Remove sample which had too low output reads
+ps_f <- prune_samples(!(sample_names(ps_f)  %in% c("NC1", "NC2", "NC3", "NC4", "NC5", "NC6", "NC7")), ps_f) # After checking the speicies composition of NCs are quite different from samples, then remove NC sample
+
+ps_f <- ps_f %>% subset_taxa(Kingdom != "Unassigned") %>% 
+  subset_taxa(Class != "D_2__Chloroplast") %>% 
+  subset_taxa(Family != "D_4__Mitochondria")
+```
+
+##### 2. Bacterial data preparation
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+OTU_b <- read.csv(file = '/Users/yupeitseng/Documents/RA/FS_PSF/Microbes/OTU_table_bacteria.txt', sep = '', header = T, check.names = TRUE, row.names = 1) %>% t()
+# feature_table_L1 <- feature_table_L1[, -8]
+
+taxa_b <- read.csv(file='/Users/yupeitseng/Documents/RA/FS_PSF/Microbes/taxa_bacteria.csv', sep = '', header = F, check.names = T, row.names = 1) %>% slice(-1) %>% select(-8) %>% as.matrix() %>% tax_table()
+colnames(taxa_b) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+
+samdf_b <- read.csv(file = '/Users/yupeitseng/Documents/RA/FS_PSF/Microbes/sample_data.csv', header = T, check.names = T, row.names = 1) %>% filter(sample_ID %in% rownames(OTU_b)) %>% as.data.frame() %>% sample_data() 
+rownames(samdf_b) <- samdf_b$sample_ID
+
+ps_b <- phyloseq(otu_table(OTU_b, taxa_are_rows = F), 
+               sample_data(samdf_b), 
+               tax_table(taxa_b))
+
+ps_b <- prune_samples(!(sample_names(ps_b) %in% c("E09")), ps_b) #Remove sample which had too low output reads
+ps_b <- prune_samples(!(sample_names(ps_b)  %in% c("NC1", "NC2", "NC3", "NC4", "NC5", "NC6", "NC7")), ps_b) # After checking the speicies composition of NCs are quite different from samples, then remove NC sample
+
+ps_b <- ps_b %>% subset_taxa(Kingdom != "Unassigned") %>% 
+  subset_taxa(Class != "D_2__Chloroplast") %>% 
+  subset_taxa(Family != "D_4__Mitochondria")
+```
+
+##### 3. Information of Fushan dynamic plots
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+#Importing data for Fushan dynamic plots 
+load("/Users/yupeitseng/Documents/RA/FS_PSF/data/fs.elev.RData")
+load("/Users/yupeitseng/Documents/RA/FS_PSF/data/fs.full.RData")
+```
+
+### Rarefying
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+#Draw ps rarefaction Curve 
+plot_rarecurve <- function(phy = phy, ttl = ttl){
+  color <- randomColor(count = 69)
+  raremax <- min(sample_sums(phy)) #get the minimum point
+  tab <- otu_table(phy)
+  class(tab) <- "matrix"
+  print(raremax)
+  vegan::rarecurve(tab, step=50, cex=0.5, xlab="Sequence sample size", ylab="Species richness", label = F, col = color)+
+  geom_text(title(ttl))+
+  abline(v=raremax) 
+}
+```
+
+The rarefraction curve of fungi, with the raremax = 22320.
+```{r, warning = FALSE,  message=FALSE}
+plot_rarecurve((ps_f), "Rarefraction Curve - Fungi")
+```
+The rarefraction curve of bacteria, with the raremax = 2218.
+```{r, warning = FALSE,  message=FALSE}
+plot_rarecurve((ps_b), "Rarefraction Curve - Bacteria")
+```
+
+```{r, warning = FALSE,  message=FALSE}
+#Making the phyloseq object that its OTU table has been rarefied.
+rarefied_ps_f <- rarefy_even_depth(ps_f, rngseed = 1, sample.size = min(sample_sums(ps_f)), replace = F)
+rarefied_ps_b <- rarefy_even_depth(ps_b, rngseed = 1, sample.size = min(sample_sums(ps_b)), replace = F)
+```
+
+### Alpha diversity
+##### 1. Fungi
+There's no difference in alpha diversity between different species nor decay categories. 
+```{r, warning = FALSE,  message=FALSE, fig.width = 12, fig.height = 9}
+alpha_f <- estimate_richness(rarefied_ps_f)[, c("Observed", "Shannon", "Simpson")] %>% merge(samdf_f[, c("sp", "decay_cat")], by = 0, all.x=TRUE) %>% pivot_longer(cols = c("Observed", "Shannon", "Simpson"), names_to='measure', values_to='value')
+
+ggboxplot(alpha_f, x = "decay_cat", y = "value", color = "decay_cat"
+) +
+  scale_color_manual(values=c("#ADC178", "#F1DCA7", "#997B66"), "Decay categories", labels = c("Short decay", "Alive", "Long decay"))+
+  labs(x = "Decay category", y = "Alpha diversity")+
+  theme(text = element_text(size = 15))+
+  scale_x_discrete(labels = c("Short decay", "Alive", "Long decay"))+
+  facet_grid(measure ~ sp, scales = "free_y", switch = "y")
+
+stat.test_f <- alpha_f %>%
+  group_by(sp, measure) %>%
+  t_test(value ~ decay_cat) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance()
+stat.test_f
+```
+
+##### 2. Bacteria
+There's no difference in alpha diversity between different species nor decay categories. 
+```{r, warning = FALSE,  message=FALSE, fig.width = 12, fig.height = 9}
+alpha_b <- estimate_richness(rarefied_ps_b)[, c("Observed", "Shannon", "Simpson")] %>% merge(samdf_f[, c("sp", "decay_cat")], by = 0, all.x=TRUE) %>% pivot_longer(cols = c("Observed", "Shannon", "Simpson"), names_to='measure', values_to='value')
+
+ggboxplot(alpha_b, x = "decay_cat", y = "value", color = "decay_cat"
+) +
+  scale_color_manual(values=c("#ADC178", "#F1DCA7", "#997B66"), "Decay categories", labels = c("Short decay", "Alive", "Long decay"))+
+  labs(x = "Decay category", y = "Alpha diversity")+
+  theme(text = element_text(size = 15))+
+  scale_x_discrete(labels = c("Short decay", "Alive", "Long decay"))+
+  facet_grid(measure ~ sp, scales = "free_y", switch = "y")
+
+stat.test_b <- alpha_b %>%
+  group_by(sp, measure) %>%
+  t_test(value ~ decay_cat) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance()
+stat.test_b
+```
+
+### Multivariate statististical analysis
+##### 1. Community structure affected by soil from different plant species
+For both fungal and bacterial communities in the soil from E. roxburghiana and M. zuihoensis showed significant different.
+Fungi
+```{r, warning = FALSE,  message=FALSE}
+#Fungi
+#Transform data to proportions as appropriate for Bray-Curtis distances
+ps.prop_f <- transform_sample_counts(rarefied_ps_f, function(otu) otu/sum(otu))
+#NMDS
+ord.nmds.bray_f <- ordinate(ps.prop_f, method="NMDS", distance="bray")
+#Bray-curtis distance matrix
+bray.dist_f <-vegdist(ps.prop_f@otu_table, method='bray')
+#PERMANOVA
+adonis2(bray.dist_f ~ as.factor(ps.prop_f@sam_data$sp), permutations=9999)
+
+#NMDS plot for fungi
+plot_f <- plot_ordination(ps.prop_f, ord.nmds.bray_f, color = "sp") + 
+  geom_point(size = 6)+
+  stat_ellipse(type = "norm", linetype = 2) + 
+  stat_ellipse(type = "t") + 
+  theme_bw() + 
+  scale_color_manual(values=c("#A7C084", "#B6A87C"), "Species", )+
+  theme(text = element_text(size = 15))+
+  annotate(geom = 'text', label = paste("Stress = ", as.character(round(ord.nmds.bray_f$stress, 2))), x = -Inf, y = Inf, hjust = -0.05, vjust = 1.5, size = 3)
+```
+Bacteria
+```{r, warning = FALSE,  message=FALSE}
+#Bacteria
+ps.prop_b <- transform_sample_counts(rarefied_ps_b, function(otu) otu/sum(otu))
+ord.nmds.bray_b <- ordinate(ps.prop_b, method="NMDS", distance="bray")
+bray.dist_b <-vegdist(ps.prop_b@otu_table, method='bray')
+adonis2(bray.dist_b ~ as.factor(ps.prop_b@sam_data$sp), permutations=9999)
+
+#NMDS plot for bacteria
+plot_b <- plot_ordination(ps.prop_b, ord.nmds.bray_b, color = "sp") + 
+  geom_point(size = 6)+
+  stat_ellipse(type = "norm", linetype = 2) + 
+  stat_ellipse(type = "t") + 
+  theme_bw() + 
+  scale_color_manual(values=c("#A7C084", "#B6A87C"), "Species", )+
+  theme(text = element_text(size = 15))+
+  annotate(geom = 'text', label = paste("Stress = ", as.character(round(ord.nmds.bray_b$stress, 2))), x = -Inf, y = Inf, hjust = -0.05, vjust = 1.5, size = 3)
+```
+
+(a) Fungi, (b) Bacteria
+```{r, warning = FALSE,  message=FALSE}
+ggarrange(plot_f, plot_b, labels = c("(a)", "(b)"), font.label = list(size = 20), common.legend = T, legend = "bottom", hjust=-0.15, vjust = 0.1)+
+theme(plot.margin = margin(1.4,0.4,0.4,0.4, "cm"))
+``` 
+
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+# png(file="/Users/yupeitseng/Documents/RA/FS_PSF/plots/Figure_NMDS_Species.png",
+# width=1200, height=900)
+# ggarrange(plot_f, plot_b, labels = c("(a)", "(b)"), font.label = list(size = 30), common.legend = T, legend = "bottom", hjust=-0.15, vjust = 0.1)+
+#   theme(plot.margin = margin(1.4,0.4,0.4,0.4, "cm"))
+# dev.off()
+```
+##### 2. Community structure affected by soil from different plant species and decay categories
+Considering both factors, plant species and decay categories in PERMANOVA.
+```{r, warning = FALSE,  message=FALSE}
+#Fungi
+adonis2(bray.dist_f ~ as.factor(ps.prop_f@sam_data$sp) + as.factor(ps.prop_f@sam_data$decay_cat), permutations=9999)
+#Bacteria
+adonis2(bray.dist_b ~ as.factor(ps.prop_b@sam_data$sp) + as.factor(ps.prop_b@sam_data$decay_cat), permutations=9999)
+```
+##### 3. Community structure affected by soil from each of plant species with different decay categories for fungal communities
+Fungi, plant E
+```{r, warning = FALSE,  message=FALSE}
+#Fungi, plant E
+ps.prop_f_e <- prune_samples(ps.prop_f@sam_data$sp != "MACHZU", ps.prop_f)
+ord.nmds.bray_f_e <- ordinate(ps.prop_f_e, method="NMDS", distance="bray")
+plot_f_e <- plot_ordination(ps.prop_f_e, ord.nmds.bray_f_e, color = "decay_cat") + 
+  geom_point(size = 6)+
+  stat_ellipse(type = "norm", linetype = 2) + 
+  stat_ellipse(type = "t") + 
+  theme_bw() + 
+  scale_color_manual(values=c("#ADC178", "#F1DCA7", "#997B66"), "Decay categories", labels = c("Long decay", "Short decay", "Alive"))+
+  theme(text = element_text(size = 15))+
+  annotate(geom = 'text', label = paste("Stress = ", as.character(round(ord.nmds.bray_f_e$stress, 2))), x = -Inf, y = Inf, hjust = -0.05, vjust = 1.5, size = 3)
+
+bray.dist_f_e <-vegdist(ps.prop_f_e@otu_table, method='bray')
+#PERMANOVA
+adonis2(bray.dist_f_e ~ as.factor(ps.prop_f_e@sam_data$decay_cat), permutations=9999)
+#Pairwise multilevel comparison using ADONIS
+pairwise.adonis(bray.dist_f_e, as.factor(ps.prop_f_e@sam_data$decay_cat))
+```
+Fungi, plant M
+```{r, warning = FALSE,  message=FALSE}
+#Fungi, plant M
+ps.prop_f_m <- prune_samples(ps.prop_f@sam_data$sp != "ENGERO", ps.prop_f)
+ord.nmds.bray_f_m <- ordinate(ps.prop_f_m, method="NMDS", distance="bray")
+plot_f_m <- plot_ordination(ps.prop_f_m, ord.nmds.bray_f_m, color = "decay_cat") + 
+  geom_point(size = 6)+
+  stat_ellipse(type = "norm", linetype = 2) + 
+  stat_ellipse(type = "t") + 
+  theme_bw() + 
+  scale_color_manual(values=c("#ADC178", "#F1DCA7", "#997B66"), "Decay categories", labels = c("Long decay", "Short decay", "Alive"))+
+  theme(text = element_text(size = 15))+
+  annotate(geom = 'text', label = paste("Stress = ", as.character(round(ord.nmds.bray_f_m$stress, 2))), x = -Inf, y = Inf, hjust = -0.05, vjust = 1.5, size = 3)
+
+bray.dist_f_m <-vegdist(ps.prop_f_m@otu_table, method='bray')
+#PERMANOVA
+adonis2(bray.dist_f_m ~ as.factor(ps.prop_f_m@sam_data$decay_cat), permutations=9999)
+```
+
+(a) Fungi, plant E, (b) Fungi plant_m
+```{r, warning = FALSE,  message=FALSE}
+ggarrange(plot_f_e, plot_f_m, labels = c("(a)", "(b)"), common.legend = T)
+```
+
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+#Exporting the table of pairwise multilevel comparison using ADONIS in latex format
+# xtable(pairwise.adonis(bray.dist_f_e, as.factor(ps.prop_b_e@sam_data$decay_cat)), type = "latex")
+```
+
+##### 3. Community structure affected by soil from each of plant species with different decay categories for bacterial communities
+Bacteria, plant E
+```{r, warning = FALSE,  message=FALSE}
+#Bacteria, plant E
+ps.prop_b_e <- prune_samples(ps.prop_b@sam_data$sp != "MACHZU", ps.prop_b)
+ord.nmds.bray_b_e <- ordinate(ps.prop_b_e, method="NMDS", distance="bray")
+plot_b_e <- plot_ordination(ps.prop_b_e, ord.nmds.bray_b_e, color = "decay_cat") + 
+  geom_point(size = 6)+
+  stat_ellipse(type = "norm", linetype = 2) + 
+  stat_ellipse(type = "t") + 
+  theme_bw() + 
+  scale_color_manual(values=c("#ADC178", "#F1DCA7", "#997B66"), "Decay categories", labels = c("Long decay", "Short decay", "Alive"))+
+  theme(text = element_text(size = 15))+
+  annotate(geom = 'text', label = paste("Stress = ", as.character(round(ord.nmds.bray_b_e$stress, 2))), x = -Inf, y = Inf, hjust = -0.05, vjust = 1.5, size = 3)
+
+bray.dist_b_e <-vegdist(ps.prop_b_e@otu_table, method='bray')
+#PERMANOVA
+adonis2(bray.dist_b_e ~ as.factor(ps.prop_b_e@sam_data$decay_cat), permutations=9999)
+#Pairwise multilevel comparison using ADONIS
+pairwise.adonis(bray.dist_b_e, as.factor(ps.prop_b_e@sam_data$decay_cat))
+```
+Bacteria, plant M
+```{r, warning = FALSE,  message=FALSE}
+#Bacteria, plant M
+ps.prop_b_m <- prune_samples(ps.prop_b@sam_data$sp != "ENGERO", ps.prop_b)
+ord.nmds.bray_b_m <- ordinate(ps.prop_b_m, method="NMDS", distance="bray")
+plot_b_m <- plot_ordination(ps.prop_b_m, ord.nmds.bray_b_m, color = "decay_cat") + 
+  geom_point(size = 6)+
+  stat_ellipse(type = "norm", linetype = 2) + 
+  stat_ellipse(type = "t") + 
+  theme_bw() + 
+  scale_color_manual(values=c("#ADC178", "#F1DCA7", "#997B66"), "Decay categories", labels = c("Long decay", "Short decay", "Alive"))+
+  theme(text = element_text(size = 15))+
+  annotate(geom = 'text', label = paste("Stress = ", as.character(round(ord.nmds.bray_b_m$stress, 2))), x = -Inf, y = Inf, hjust = -0.05, vjust = 1.5, size = 3)
+
+bray.dist_b_m <-vegdist(ps.prop_b_m@otu_table, method='bray')
+#PERMANOVA
+adonis2(bray.dist_b_m ~ as.factor(ps.prop_b_m@sam_data$decay_cat), permutations=9999)
+```
+(a) Bacteria, plant E, (b) Bacteria, plant M
+```{r, warning = FALSE,  message=FALSE}
+ggarrange(plot_b_e, plot_b_m, labels = c("(a)", "(b)"), common.legend = T)
+```
+
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+# png(file="/Users/yupeitseng/Documents/RA/FS_PSF/plots/Figure_NMDS_Decay.png",
+# width=1200, height=1200)
+# ggarrange(plot_f_e, plot_f_m, plot_b_e, plot_b_m, labels = c("(a)", "(b)", "(c)", "(d)"), font.label = list(size = 30), common.legend = T, legend = "bottom", nrow = 2, ncol = 2, hjust=-0.15, vjust = 0.1)+
+#   theme(plot.margin = margin(1.4,0.4,1.4,0.4, "cm"))
+# dev.off()
+```

@@ -1,0 +1,826 @@
+---
+title: "Fushan Plant-Soil Feedback Greenhouse Experiment Data Analysis"
+author: "Yu-Pei Tseng"
+date: "12/06/2023"
+output:
+  html_document:
+    code_folding: show
+---
+```{r, warning = FALSE, message = FALSE}
+#Importing packages
+library(patchwork)
+library(PerformanceAnalytics)
+library(ggplot2)
+library(scatterpie)
+library(gtools)
+library(rpsychi)
+library(tidyverse)
+library(stringr)
+library(rstatix)
+library(ggpubr)
+library(xtable)
+```
+
+
+```{r}
+#Importing data
+biomass_FS <- read.csv("/Users/yupeitseng/Documents/RA/FS_PSF/R_markdown/perfomance_FS.csv")
+```
+
+### Data Investigation
+##### 1. Checking the variation of root-shoot ratio within group.
+The variation of root-shoot ratio is big within group. It will be better to collect the data with both aboveground biomass and belowground biomass."M" stands for *Machilus zuihoensis*, "E" stands for *Engelhardtia roxburghiana*.
+```{r setup, warning = FALSE}
+ggplot(biomass_FS %>% filter(soil_sp != "bg"), aes(x = plant_sp, y = root_shoot_ratio, col = sterilization)) + 
+  stat_boxplot(geom = "errorbar", # Error bars
+               width = 0.25) +    # Bars width
+  geom_boxplot()+
+  scale_color_manual(values=c("#A7C084", "#B6A87C"), "Sterilization")+
+  labs(x = "Plant species", y = "Root-shoot ratio") +
+  facet_grid(decay_cat ~ soil_sp)
+```
+
+##### 2. Checking the relationship between performance index, including, aboveground biomass, belowground biomass, total biomass, height and growth rate.
+```{r, warning = FALSE}
+chart.Correlation(biomass_FS[, c('above_mass', 'below_mass', 'total_mass', 'height', 'growth_rate')])
+```
+
+##### 3. Make a bar plot for raw data.
+"M" stands for *Machilus zuihoensis*, "E" stands for *Engelhardtia roxburghiana*.
+```{r, warning = FALSE,  message=FALSE, fig.width = 20, , fig.height = 12}
+biomass_FS_st <- biomass_FS %>% select(c("soil_sp", "decay_cat", "sterilization", "plant_sp", "total_mass")) # "total mass" can be replaced by "above_mass", "below_mass", "height", and "growth_rate"
+colnames(biomass_FS_st)[5] <- 'performance'
+biomass_FS_st <- biomass_FS_st %>% group_by(plant_sp, soil_sp, decay_cat, sterilization) %>% summarise(se = sd(performance, na.rm = T)/sqrt(n()), mean = mean(performance, na.rm = T)) %>%mutate(treatment = paste(decay_cat, sterilization, sep = '_'), group = paste(plant_sp, soil_sp, sep = '_')) %>% filter(soil_sp != 'bg')
+
+ggplot(biomass_FS_st, aes(x=treatment, y=mean, fill=decay_cat)) +
+  geom_bar(position=position_dodge(), stat="identity") +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2,position=position_dodge(.9))+
+  scale_x_discrete(labels = rep(c("Live", "Sterile"), 3))+
+  labs(y= "Total mass", x = "Plant sp._Soil sp.", fill = "Decay catagories")+
+  scale_fill_manual(values=c("#556B37", "#A7C084", "#CAD9B5"), labels = c("Alive", "Long decay", "Short decay"))+
+  facet_wrap(~group)+
+  theme(text = element_text(size = 25), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+```
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+# png(file="/Users/yupeitseng/Documents/RA/FS_PSF/plots/Figure_Total_Mass.png",
+# width=1600, height=900)
+# ggplot(biomass_FS_st, aes(x=treatment, y=mean, fill=decay_cat)) +
+#   geom_bar(position=position_dodge(), stat="identity") +
+#   geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2,position=position_dodge(.9))+
+#   scale_x_discrete(labels = rep(c("Live", "Sterile"), 3))+
+#   labs(y= "Total mass", x = "Plant species_Soil species.", fill = "Decay catagories")+
+#   scale_fill_manual(values=c("#556B37", "#A7C084", "#CAD9B5"), labels = c("Alive", "Long decay", "Short decay"))+
+#   facet_wrap(~group)+
+#   theme(text = element_text(size = 40), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+# panel.background = element_blank(), axis.line = element_line(colour = "black"))
+# dev.off()
+```
+
+##### 4. ANOVA by raw data.
+```{r, warning = FALSE}
+E_aov <- biomass_FS %>% select(c("soil_sp", "decay_cat", "sterilization", "plant_sp", "total_mass")) 
+colnames(E_aov)[5] <- 'performance'
+E_aov <- E_aov %>% mutate(performance = performance) %>% 
+  filter(soil_sp != 'bg')
+
+#ANOVA results for Plant E
+summary(lm(performance ~ soil_sp + decay_cat + sterilization + soil_sp*decay_cat*sterilization, data = as.data.frame(filter(E_aov, plant_sp == 'E'))))
+
+#ANOVA results for Plant M
+summary(lm(performance ~ soil_sp + decay_cat + sterilization + soil_sp*decay_cat*sterilization, data = as.data.frame(filter(E_aov, plant_sp == 'M'))))
+```
+
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+#Exporting the table of pairwise multilevel comparison using ADONIS in latex format
+xtable(summary(lm(performance ~ soil_sp + decay_cat + sterilization + soil_sp*decay_cat*sterilization, data = as.data.frame(filter(E_aov, plant_sp == 'E')))), type = "latex")
+xtable(summary(lm(performance ~ soil_sp + decay_cat + sterilization + soil_sp*decay_cat*sterilization, data = as.data.frame(filter(E_aov, plant_sp == 'M')))), type = "latex")
+```
+
+##### 5. "Cleveland dotplot" type plot of the biomass values.
+Codes are from  Kandlikar et al. (2021) . "M" stands for *Machilus zuihoensis*, "E" stands for *Engelhardtia roxburghiana*, "bg" stands for background treatments (i.e. seedlings are planted in potting mix only). The function **cleveland_dotplot(performance index, x-axis lab)** can be inputted with different performance index includes, "above_mass", "below_mass", "total_mass", "height", and "growth_rate". 
+```{r message=FALSE, warning=FALSE, class.source = 'fold-hide', fig.show='hide'}
+# Theme for plots
+theme_gsk <- function() {
+  theme_minimal()+
+    theme(panel.border = element_blank(), 
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(), 
+          axis.line = element_line(colour = "black"),
+          plot.tag = element_text(face = "bold")
+    ) 
+}
+
+cleveland_dotplot <- function(value = value, x_title = x_title)
+  {biomass_for_cleveland <- biomass_FS %>% select("plant_sp", "soil_sp", "decay_cat", "sterilization", value) 
+  colnames(biomass_for_cleveland)[5] <- 'performance'
+  biomass_for_cleveland <-  biomass_for_cleveland %>% group_by(plant_sp, soil_sp, decay_cat, sterilization) %>%
+  summarize(
+    # Get the mean and SEM for each (focal*soil source) group:
+    mean_bm = mean(performance, na.rm = T),
+    se_bm = sd(performance, na.rm = T)/sqrt(n()),
+    # Also get the median and IQRs
+    median_bm = median(performance, na.rm = T),
+    lqr = quantile(performance, 0.25, na.rm = T),
+    uqr = quantile(performance, 0.75, na.rm = T),
+    # Get outliers
+    min_val = min(performance, na.rm = T),
+    max_val = max(performance, na.rm = T),
+    out_low = ifelse(min_val < lqr - 1.5*(uqr-lqr), min_val, NA),
+    out_upp = ifelse(max_val > uqr + 1.5*(uqr-lqr), max_val, NA),
+    n = n()) 
+
+# add a column that sets the y-value of the points -- 
+# needed, because I want to add the outlier points
+biomass_for_cleveland$plot_y <- (c(seq(0.6, 1.1, by = .1),
+                                      seq(1.6, 2.1, by = .1)+1,
+                                      2.6+2,
+                                      seq(3.6, 4.1, by = .1)+3,
+                                      seq(4.6, 5.1, by = .1)+4,
+                                      5.6+5))
+biomass_for_cleveland <- biomass_for_cleveland %>% mutate(pointcol = paste(decay_cat, sterilization, sep = '_'), treatment = paste(plant_sp, soil_sp, sep = '_'))
+# Make a new data frame that includes the outlier points
+# Outliers here are defined as those points that are either
+# lower than (LQR - 1.5*IQR), or higher than (UQR + 1.5*IQR)
+biomass_raw <- biomass_FS %>% select("plant_sp", "soil_sp", "decay_cat", "sterilization", value) 
+colnames(biomass_raw)[5] <- 'performance'
+outliers <- left_join(biomass_raw, biomass_for_cleveland) %>%
+  filter(performance < lqr - (1.5*(uqr-lqr)) | 
+           performance > uqr + (1.5*(uqr-lqr))) %>%
+  select(plant_sp, soil_sp, pointcol, performance, plot_y)
+
+
+(biomass_dotplot <- ggplot(biomass_for_cleveland, 
+                           aes(y = plot_y, x = median_bm, fill = pointcol, label = treatment, shape = pointcol)) + scale_x_log10() +
+    # add median value
+    geom_point(size = 4, stroke = .9) +
+    # add dashed lines connecting outlier to median (if outlier exists)
+    geom_errorbarh(aes(xmin = out_low, xmax = lqr),
+                   height = 0, linetype = 3, size = .25) +
+    geom_errorbarh(aes(xmin = uqr, xmax = out_upp),
+                   height = 0, linetype = 3, size = .25) +
+    # add outlying points (if they exist)
+    geom_point(aes(y = plot_y, x = out_low), shape = 21, fill = "grey50", size = .5) +
+    geom_point(aes(y = plot_y, x = out_upp), shape = 21, fill = "grey50", size = .5) +
+    geom_point(data = outliers, aes(x = performance, y = plot_y),
+               shape = 21, fill = "grey50", size = .5, inherit.aes = F) +
+    
+    # add solid line connecting median to lower and upper quantile
+    geom_errorbarh(aes(xmin = lqr, xmax = uqr), height = .1) +
+    
+    # Set color and shape for all the points
+    scale_fill_manual(values = c("darkgreen", "cornsilk4", "cornsilk", "blue4", "cadetblue1", "darkseagreen", "darkseagreen1"),
+                      name = "Inoculum\nsource") +
+    scale_shape_manual(values = c(23, 22, 21, 22, 21, 22, 21),
+                       name = "Inoculum\nsource") +
+    # add thin line between each focal species
+    geom_hline(yintercept = c(2, 4, 6, 8, 10), linetype = 1, size = 0.25) +
+    # add species names along y-axis
+    scale_y_continuous(breaks = c(1,3,5,7,9,11),
+                       labels = (unique(biomass_for_cleveland$treatment))) +
+    # misc. theme settings.
+    ylab("Focal species_Soil species") +
+    xlab(x_title) +
+    theme_gsk() +
+    theme(legend.position = "top",
+      legend.text = element_text(size = 8)) + 
+    NULL)
+}
+
+cleveland_dotplot("total_mass", "Total biomass (mg)")
+```
+
+
+
+### Using model fitting approach to invastigate microbial effect
+##### 1. Model fitting.
+Using simple linear regression to regress sterilization (live soil or sterilized soil) on performance (total mass here) for each group (Plant E/M in soil E/M with decay categories fresh/shortd/longd). The correlation coefficients, standard error, and p-values were extracted, representing microbial effect, the standard error of microbial effect itself, and the significance of microbial effect, respectively.
+```{r, warning = FALSE, message = FALSE}
+m_effect <- biomass_FS %>% select(c("soil_sp", "decay_cat", "sterilization", "plant_sp", "total_mass")) # "total mass" can be replaced by "above_mass", "below_mass", "height", and "growth_rate"
+colnames(m_effect)[5] <- 'performance' 
+
+#fitting linear model and extract the correlation coefficients standard errors, and p-values
+m_effect  <- m_effect  %>% mutate(performance = log(performance)) %>% 
+  filter(soil_sp != 'bg') %>% 
+  mutate(sterilization = ifelse(sterilization == 'live', 1, 0)) %>% 
+  group_by(plant_sp, soil_sp, decay_cat) %>% 
+  summarise(mean = summary(lm(performance~sterilization))$coefficients[2, 1], se = summary(lm(performance~sterilization))$coefficients[2, 2], p = summary(lm(performance~sterilization))$coefficients[2, 4], n = sum(!is.na(performance))) %>% 
+  mutate(treatment = paste(plant_sp, soil_sp, sep = "_")) %>% 
+  mutate(ano_x = ifelse(p<0.001, '***', ifelse(p<0.01, '**', ifelse(p<0.05, '*', NA))), ano_y = ifelse(p<0.05, mean+se, NA)) %>% 
+  mutate(sd = se * sqrt(n)) #The data frame with mean, standard error, and p-values of microbial effect of each groups.
+m_effect  <- m_effect  %>% mutate(plant_sp = ifelse(plant_sp == "E", "Plant_E", "Plant_M"), soil_sp = ifelse(soil_sp == "E", "Soil_E", "Soil_M")) #The data frame was additionally added the information for later plotting.
+```
+
+##### 2. Plotting.
+```{r, warning = FALSE,  message=FALSE, fig.width = 20, fig.height = 12}
+ggbarplot(
+  m_effect , x = "decay_cat", y = "mean", fill = "decay_cat", color = NA,
+  facet = c("plant_sp", "soil_sp")
+) +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2,position=position_dodge(.9))+
+  labs(y= "Microbial effect", x = "Decay category", fill = "Decay catagory")+
+  scale_fill_manual(values=c("#556B37", "#A7C084", "#CAD9B5"))+
+  geom_text(aes(label=ano_x, group = decay_cat), col='black', position = position_dodge(width = 1), vjust = -0.5, size = 5)+
+  theme(text = element_text(size = 25))
+```
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+# png(file="/Users/yupeitseng/Documents/RA/FS_PSF/plots/Figure_Microbial_Effect.png",
+# width=1600, height=900)
+# ggbarplot(
+#   m_effect , x = "decay_cat", y = "mean", fill = "decay_cat", color = NA,
+#   facet = c("plant_sp", "soil_sp")
+# ) +
+#   scale_x_discrete(labels=c('Alive', 'Long decay', 'Short decay'))+
+#   geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2,position=position_dodge(.9))+
+#   labs(y= "Microbial effect", x = "Decay categories", fill = "Decay catagory")+
+#   scale_fill_manual(values=c("#556B37", "#A7C084", "#CAD9B5"))+
+#   geom_text(aes(label=ano_x, group = decay_cat), col='black', position = position_dodge(width = 1), vjust = -0.5, size = 10)+
+#   theme(text = element_text(size = 40))
+# dev.off()
+```
+
+##### 3. Two-way ANOVA by mean and sdandard error.
+```{r, warning = FALSE,  message=FALSE}
+two_way_anova <- function(anova_dat = anova_dat){
+  # anova_dat <- E %>% filter(plant_sp == "Plant_E")
+  total_mean <- sum(anova_dat$mean*anova_dat$n)/sum(anova_dat$n)
+  ss_soil <- sum(anova_dat %>% group_by(soil_sp) %>% summarise(mean = (sum(mean*n))/sum(n), n = sum(n)) %>% mutate(ss = ((mean-total_mean)^2)*n) %>% select("ss"))
+  ss_decay <- sum(anova_dat %>% group_by(decay_cat) %>% summarise(mean = (sum(mean*n))/sum(n), n = sum(n)) %>% mutate(ss = ((mean-total_mean)^2)*n) %>% select("ss"))
+  ss_between <- sum(((anova_dat$mean - total_mean)^2)*anova_dat$n)
+  ss_soil_decay <- ss_between - ss_soil - ss_decay
+  ss_within <- sum(as.data.frame(anova_dat %>% mutate(ss = ((sd)^2)*(n-1)) %>% select("ss"))$ss)
+  df_within <- sum(anova_dat$n) - 5
+  anova_within <- ss_within/df_within
+  
+  anova_tab <- matrix(ncol = 2, nrow = 3, c(ss_soil, ss_decay, ss_soil_decay, 1, 2, 2), byrow = F)
+  colnames(anova_tab) <- c("ss", "df")
+  anova_tab <- anova_tab %>% as.data.frame() %>% mutate(mean_squares = ss/df) %>% mutate(f = mean_squares/anova_within) %>% mutate(p = pf(f, df, (sum(anova_dat$n) - 5), lower.tail = FALSE)) %>% add_row(tibble_row(ss = ss_within, df = df_within, mean_squares = anova_within))
+  rownames(anova_tab) <- c("soil", "decay", "soil:decay", "error")
+  return(anova_tab)
+}
+
+#Plant E
+two_way_anova(m_effect %>% filter(plant_sp == "Plant_E"))
+
+#Plant M
+two_way_anova(m_effect %>% filter(plant_sp == "Plant_M"))
+```
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+#Exporting the table in latex format
+xtable(two_way_anova(m_effect %>% filter(plant_sp == "Plant_E")), type = "latex")
+xtable(two_way_anova(m_effect %>% filter(plant_sp == "Plant_M")), type = "latex")
+```
+
+### Reshaping data for calculating invasion growth rate, stabilization and fitness differences
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+biomass_long <- biomass_FS %>% filter(soil_sp != 'bg') %>% select("plant_sp", "soil_sp", "decay_cat", "sterilization", "pair_id", "total_mass") 
+colnames(biomass_long)[6] <- 'performance'
+biomass_long <- biomass_long %>% mutate(log_performance = log10(performance))
+
+#the function for making long format dataframe into wide format
+make_wide_biomass <- function(df) {
+  df %>% mutate(pair = paste(plant_sp, soil_sp, decay_cat, sterilization, sep = "_")) %>%
+    select(pair_id, pair, log_performance) %>%
+    spread(pair, log_performance)
+}
+biomass_wide <- make_wide_biomass(biomass_long)
+```
+
+### Invasion growth rate 
+##### 1. Functions related to investigation of invasion growth rate.
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+#functions for calculating invasion growth rate
+calculate_IGR <- function(df) {
+  df %>% 
+    mutate(freshE_freshM_E = (E_M_fresh_live - E_M_fresh_sterile) - (M_M_fresh_live - M_M_fresh_sterile),
+           freshE_freshM_M = (M_E_fresh_live - M_E_fresh_sterile) - (E_E_fresh_live - E_E_fresh_sterile),
+           shortdE_shortdM_E = (E_M_shortd_live - E_M_shortd_sterile) - (M_M_shortd_live - M_M_shortd_sterile),
+           shortdE_shortdM_M = (M_E_shortd_live - M_E_shortd_sterile) - (E_E_shortd_live - E_E_shortd_sterile),
+           longdE_longdM_E = (E_M_longd_live - E_M_longd_sterile) - (M_M_longd_live - M_M_longd_sterile),
+           longdE_longdM_M = (M_E_longd_live - M_E_longd_sterile) - (E_E_longd_live - E_E_longd_sterile),
+           freshE_shortdM_E = (E_M_shortd_live - E_M_shortd_sterile) - (M_M_shortd_live - M_M_shortd_sterile),
+           freshE_shortdM_M = (M_E_fresh_live - M_E_fresh_sterile) - (E_E_fresh_live - E_E_fresh_sterile),
+           freshE_longdM_E = (E_M_longd_live - E_M_longd_sterile) - (M_M_longd_live - M_M_longd_sterile),
+           freshE_longdM_M = (M_E_fresh_live - M_E_fresh_sterile) - (E_E_fresh_live - E_E_fresh_sterile),
+           shortdE_longdM_E = (E_M_longd_live - E_M_longd_sterile) - (M_M_longd_live - M_M_longd_sterile),
+           shortdE_longdM_M = (M_E_shortd_live - M_E_shortd_sterile) - (E_E_shortd_live - E_E_shortd_sterile),
+           shortdE_freshM_E = (E_M_fresh_live - E_M_fresh_sterile) - (M_M_fresh_live - M_M_fresh_sterile),
+           shortdE_freshM_M = (M_E_shortd_live - M_E_shortd_sterile) - (E_E_shortd_live - E_E_shortd_sterile),
+           longdE_freshM_E = (E_M_fresh_live - E_M_fresh_sterile) - (M_M_fresh_live - M_M_fresh_sterile),
+           longdE_freshM_M = (M_E_longd_live - M_E_longd_sterile) - (E_E_longd_live - E_E_longd_sterile),
+           longdE_shortdM_E = (E_M_shortd_live - E_M_shortd_sterile) - (M_M_shortd_live - M_M_shortd_sterile),
+           longdE_shortdM_M = (M_E_longd_live - M_E_longd_sterile) - (E_E_longd_live - E_E_longd_sterile)
+    )%>%
+    select(pair_id, freshE_freshM_E:longdE_shortdM_M) %>% 
+    gather(pair_id, IGR, freshE_freshM_E:longdE_shortdM_M) %>% 
+    mutate(plant_sp = sapply(strsplit(pair_id, "_"), function(x){x[3]}), treatment = paste(sapply(strsplit(pair_id, "_"), function(x){x[1]}), sapply(strsplit(pair_id, "_"), function(x){x[2]}), sep = '_'))
+}
+
+#functions for plotting invasion growth rate
+IGR_plot <- function(dat = dat){
+  as.data.frame(dat)
+  if (!("sd" %in% colnames(dat))){
+    colnames(dat)[which(colnames(dat) == "se")] <- "sd"
+  }
+  ggplot(dat, aes(x=plant_sp, y=mean, fill = plant_sp)) +
+  geom_errorbar(width=.1, aes(ymin=mean-sd, ymax=mean+sd)) +
+  geom_errorbar(width=.1, aes(ymin=mean-sd, ymax=mean+sd), data=dat) +
+  geom_point(shape=21, size=3)+
+  facet_wrap(~treatment)+
+  scale_fill_manual(values=c("#556B37", "#B6A87C"), "Plant species")+
+  theme(axis.text.x=element_blank(), #remove x axis labels
+        axis.ticks.x=element_blank())+
+  xlab("Pair") +
+  ylab("Invasion growth rate")+
+  geom_hline(yintercept=0)+
+  theme(text = element_text(size = 25))
+  }
+```
+
+##### 2. Using pre-paired raw data to calculate invasion growth rate.
+The error bars showed as the standard error of the invasion growth rate of each group.
+```{r, warning = FALSE,  message=FALSE, fig.width = 15, fig.height = 12}
+IGR_prepair <- calculate_IGR(biomass_wide) %>% group_by(pair_id, plant_sp, treatment) %>% summarise(mean = mean(IGR, na.rm = T), se = sd(IGR, na.rm = T)/n())
+IGR_plot(IGR_prepair)
+```
+##### 3. Sampling from normal distribution constructed by raw data to estimate the uncertainty of invasion growth rate.
+The error bars showed as the standard deviation of the invasion growth rate of each group.
+```{r, warning = FALSE,  message=FALSE, fig.width = 15, fig.height = 12}
+#using mean and standard deviation of the log-transformed biomass to construct the normal distribution of biomass for each group
+biomass_wide_st <- cbind(apply(biomass_wide[, -1], 2, FUN = function(x){mean(x, na.rm = T)}), apply(biomass_wide[, -1], 2, FUN = function(x){sd(x, na.rm = T)}))
+colnames(biomass_wide_st) <- c('mean', 'sd')
+
+#random sampling for 1000 times for each group
+n_reps <- 1000
+vec <- c()
+for(i in rownames(biomass_wide_st)){
+  set.seed(31415)
+  vec <- c(vec, rnorm(n_reps, mean = biomass_wide_st[i, 1], 
+                      sd = biomass_wide_st[i, 2]))
+}
+mat <- matrix(vec, ncol = 24, nrow = n_reps, byrow = F)
+colnames(mat) <- rownames(biomass_wide_st)
+mat <- as.tibble(mat) %>% mutate(pair_id = 1:n_reps)
+
+#calculate the invasion growth rate
+IGR_norm <- calculate_IGR(mat) %>% group_by(pair_id, plant_sp, treatment) %>% summarise(mean = mean(IGR, na.rm = T), sd = sd(IGR, na.rm = T))
+
+#plotting
+IGR_plot(IGR_norm)
+```
+
+##### 4. Bootstapping from raw data to estimate the uncertainty of invasion growth rate.
+```{r, warning = FALSE,  message=FALSE, fig.width = 15, fig.height = 12}
+#random sampling 1000 times with replacement from the raw data  for each group (>= 10 values for group)
+n_reps <- 1000
+vec <- c()
+for (i in colnames(biomass_wide)[-1]){
+  set.seed(31415)
+  for (j in 1:1000){
+    vec <- c(vec, mean(sample((na.exclude(unlist(unname(as.vector(biomass_wide[, i]))))), 10, replace = T), na.rm = T))
+  }
+}
+mat <- matrix(vec, ncol = 24, nrow = n_reps, byrow = F)
+colnames(mat) <- colnames(biomass_wide)[-1]
+mat <- as.tibble(mat) %>% mutate(pair_id = 1:n_reps)
+
+#calculate the invasion growth rate
+IGR_bootstrap <- calculate_IGR(mat) %>% group_by(pair_id, plant_sp, treatment) %>% summarise(mean = mean(IGR, na.rm = T), sd = sd(IGR, na.rm = T))
+
+#plotting
+IGR_plot(IGR_bootstrap)
+```
+
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+#Only choose the pairs with the same decay categories
+#functions for plotting invasion growth rate
+IGR_plot_fil <- function(dat = dat){
+  as.data.frame(dat)
+  if (!("sd" %in% colnames(dat))){
+    colnames(dat)[which(colnames(dat) == "se")] <- "sd"
+  }
+  ggplot(dat, aes(x=plant_sp, y=mean, fill = plant_sp)) +
+  geom_errorbar(width=.1, aes(ymin=mean-sd, ymax=mean+sd)) +
+  geom_errorbar(width=.1, aes(ymin=mean-sd, ymax=mean+sd), data=dat) +
+  geom_point(shape=21, size=8)+
+  facet_wrap(~treatment)+
+  scale_fill_manual(values=c("#556B37", "#B6A87C"), "Plant species")+
+  theme(axis.text.x=element_blank(), #remove x axis labels
+        axis.ticks.x=element_blank())+
+  xlab("Pair") +
+  ylab("Invasion growth rate")+
+  geom_hline(yintercept=0)+
+  theme(text = element_text(size = 30),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+  }
+#calculate the invasion growth rate
+IGR_bootstrap_fil <- IGR_bootstrap %>% filter(treatment %in% c("freshE_freshM", "shortdE_shortdM", "longdE_longdM")) %>% mutate(treatment=case_when(
+        treatment == "freshE_freshM" ~ "Alive E_Alive M",
+        treatment == "shortdE_shortdM" ~ "Short decay E_Short decay M",
+        treatment == "longdE_longdM" ~ "Long decay E_Long decay M",
+    )) 
+# png(file="/Users/yupeitseng/Documents/RA/FS_PSF/plots/Figure_IGR.png",
+# width=1600, height=900)
+# IGR_plot_fil(IGR_bootstrap_fil)
+# dev.off()
+```
+
+### Prediction of coexsistence outcomes incorporating to different method of uncertaity estimation 
+Codes are referred to Kandlikar et al. (2021) and Yen et al. (2022).
+##### 1. Preparation of the data for calaulating stabilization and fitness difference.
+```{r, warning = FALSE,  message=FALSE}
+#reshaping data for calculating stabilization and fitness difference
+biomass_for_SF <- biomass_FS %>% filter(soil_sp != 'bg') %>% select("plant_sp", "soil_sp", "decay_cat", "sterilization", "pair_id", "total_mass") 
+colnames(biomass_for_SF)[6] <- 'performance'
+biomass_for_SF <- biomass_for_SF %>% mutate(log_performance = log10(performance))
+
+# converting the long format biomass data frame into a wide format 
+make_wide_biomass <- function(df) {
+  df %>% mutate(pair = paste(plant_sp, soil_sp, decay_cat, sterilization, sep = "_")) %>%
+    select(pair_id, pair, log_performance) %>%
+    spread(pair, log_performance)
+}
+biomass_wide <- make_wide_biomass(biomass_for_SF)
+```
+
+##### 2. Functions related to predicting coexsistence outcomes.
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+# calculate the Stabilization between each species pair
+calculate_stabilization <- function(df) {
+  df %>%
+    mutate(freshE_freshM = -0.5*((E_E_fresh_live - E_E_fresh_sterile) - (E_M_fresh_live - E_M_fresh_sterile) - (M_E_fresh_live- M_E_fresh_sterile) + (M_M_fresh_live - M_M_fresh_sterile)),
+           shortdE_shortdM = -0.5*((E_E_shortd_live - E_E_shortd_sterile) - (E_M_shortd_live - E_M_shortd_sterile) - (M_E_shortd_live - M_E_shortd_sterile) + (M_M_shortd_live - M_M_shortd_sterile)),
+           longdE_longdM = -0.5*((E_E_longd_live - E_E_longd_sterile) - (E_M_longd_live - E_M_longd_sterile) - (M_E_longd_live - M_E_longd_sterile) + (M_M_longd_live - M_M_longd_sterile)),
+           freshE_shortdM = -0.5*((E_E_fresh_live - E_E_fresh_sterile) - (E_M_shortd_live - E_M_shortd_sterile) - (M_E_fresh_live - M_E_fresh_sterile) + (M_M_shortd_live - M_M_shortd_sterile)),
+           freshE_longdM = -0.5*((E_E_fresh_live - E_E_fresh_sterile) - (E_M_longd_live - E_M_longd_sterile) - (M_E_fresh_live - M_E_fresh_sterile) + (M_M_longd_live - M_M_longd_sterile)),
+           shortdE_freshM = -0.5*((E_E_shortd_live - E_E_shortd_sterile) - (E_M_fresh_live - E_M_fresh_sterile) - (M_E_shortd_live - M_E_shortd_sterile) + (M_M_fresh_live - M_M_fresh_sterile)),
+           shortdE_longdM = -0.5*((E_E_shortd_live - E_E_shortd_sterile) - (E_M_longd_live - E_M_longd_sterile) - (M_E_shortd_live - M_E_shortd_sterile) + (M_M_longd_live - M_M_longd_sterile)),
+           longdE_freshM = -0.5*((E_E_longd_live - E_E_longd_sterile) - (E_M_fresh_live - E_M_fresh_sterile) - (M_E_longd_live - M_E_longd_sterile) + (M_M_fresh_live - M_M_fresh_sterile)),
+           longdE_shortdM = -0.5*((E_E_longd_live - E_E_longd_sterile) - (E_M_shortd_live - E_M_shortd_sterile) - (M_E_longd_live - M_E_longd_sterile) + (M_M_shortd_live - M_M_shortd_sterile))
+)%>%
+    select(pair_id, freshE_freshM:longdE_shortdM) %>% 
+    gather(pair_id, stabilization, freshE_freshM:longdE_shortdM)
+}
+
+#calculating the Fitness difference between each species pair
+calculate_fitdiffs <- function(df) {
+  df %>% 
+    mutate(freshE_freshM = 0.5*((E_E_fresh_live-E_E_fresh_sterile) + (E_M_fresh_live - E_M_fresh_sterile) - (M_E_fresh_live-M_E_fresh_sterile) - (M_M_fresh_live-M_M_fresh_sterile)),
+           shortdE_shortdM = 0.5*((E_E_shortd_live-E_E_shortd_sterile) + (E_M_shortd_live-E_M_shortd_sterile) - (M_E_shortd_live-M_E_shortd_sterile) - (M_M_shortd_live-M_M_shortd_sterile)),
+           longdE_longdM = 0.5*((E_E_longd_live-E_E_longd_sterile) + (E_M_longd_live-E_M_longd_sterile) - (M_E_longd_live-M_E_longd_sterile) - (M_M_longd_live-M_M_longd_sterile)),
+           freshE_shortdM = 0.5*((E_E_fresh_live-E_E_fresh_sterile) + (E_M_shortd_live-E_M_shortd_sterile) - (M_E_fresh_live-M_E_fresh_sterile) - (M_M_shortd_live-M_M_shortd_sterile)),
+           freshE_longdM = 0.5*((E_E_fresh_live-E_E_fresh_sterile) + (E_M_longd_live-E_M_longd_sterile) - (M_E_fresh_live-M_E_fresh_sterile) - (M_M_longd_live-M_M_longd_sterile)),
+           shortdE_freshM = 0.5*((E_E_shortd_live-E_E_shortd_sterile) + (E_M_fresh_live-E_M_fresh_sterile) - (M_E_shortd_live-M_E_shortd_sterile) - (M_M_fresh_live-M_M_fresh_sterile)),
+           shortdE_longdM = 0.5*((E_E_shortd_live-E_E_shortd_sterile) + (E_M_longd_live-E_M_longd_sterile) - (M_E_shortd_live-M_E_shortd_sterile) - (M_M_longd_live-M_M_longd_sterile)),
+           longdE_freshM = 0.5*((E_E_longd_live-E_E_longd_sterile) + (E_M_fresh_live-E_M_fresh_sterile) - (M_E_longd_live-M_E_longd_sterile) - (M_M_fresh_live-M_M_fresh_sterile)),
+           longdE_shortdM = 0.5*((E_E_longd_live-E_E_longd_sterile) + (E_M_shortd_live-E_M_shortd_sterile) - (M_E_longd_live-M_E_longd_sterile) - (M_M_shortd_live-M_M_shortd_sterile))
+           ) %>%
+    select(pair_id, freshE_freshM:longdE_shortdM) %>% 
+    gather(pair_id, fitdiff_fld, freshE_freshM:longdE_shortdM)
+}
+```
+##### 3.  Using pre-paired raw data to predicting coexsistence outcomes
+```{r, warning = FALSE,  message=FALSE, fig.width = 12, , fig.height = 8}
+#calculating fitness difference
+fd_values <- calculate_fitdiffs(biomass_wide)
+fd_values <- fd_values %>% filter(!(is.na(fitdiff_fld)))
+#calculating stabilization
+stabilization_values <- calculate_stabilization(biomass_wide)
+stabilization_values <- stabilization_values %>% 
+  filter(!(is.na(stabilization)))
+
+#generating statistical summaries of stabilization and fitness difference
+stabiliation_summary <- stabilization_values %>% group_by(pair_id) %>%
+  summarize(mean_sd = mean(stabilization),
+            sem_sd = sd(stabilization)/sqrt(n()),
+            n_sd = n())
+
+fitdiff_summary <- fd_values %>% group_by(pair_id) %>%
+  summarize(mean_fd = mean(fitdiff_fld),
+            sem_fd = sd(fitdiff_fld)/sqrt(n()),
+            n_fd = n())
+
+# combining the two separate data frames
+sd_fd_summary <- left_join(stabiliation_summary, fitdiff_summary) %>% mutate(pair_id = lapply(lapply(strsplit(pair_id, '_'), FUN = function(x){(paste(substr(x, 1, 1), str_sub(x, -1, -1)))}), FUN = function(x){paste0(x, collapse = '_')}))
+
+# if mean_fd is < 0, the following command gets the absolute value and also flips around the species code so that the fitness superior is always the first species in the code
+sd_fd_summary <- sd_fd_summary %>% 
+  mutate(pair_id = ifelse(mean_fd < 0,
+                       paste0(str_extract(pair_id, "...$"),
+                              "_",
+                              str_extract(pair_id, "^...")), 
+                       pair_id),
+         mean_fd = abs(mean_fd))
+
+# Make a column that indicates the net outcome (coex. or exclusion)
+sd_fd_summary <- sd_fd_summary %>% mutate(
+  stabilize = ifelse(mean_sd - 2*sem_sd > 0, "yes", "no"), 
+  fitness = ifelse(mean_fd - 2*sem_fd > 0, "yes", "no"), 
+  outcome = ifelse(mean_fd - 2*sem_fd >
+                     mean_sd + 2*sem_sd, "exclusion", "neutral"),
+  outcome2 = ifelse(mean_fd > mean_sd, "exclusion", "coexistence"),
+  outcome2 = ifelse(mean_sd < 0, "exclusion or priority effect", outcome2)
+)
+
+# plotting stabilization and fitness difference for pre-paired data
+sd_fd_xpyplot <- ggplot(sd_fd_summary, aes(x = mean_sd, y = mean_fd, label = pair_id, fill = outcome)) +
+   ylim(c(-.6, 1)) +
+   xlim(c(-.5, 1)) +
+   geom_abline(linetype = 2) +
+   geom_hline(yintercept = 0) + geom_vline(xintercept = 0)+
+   geom_point(shape = 21, size = 3, stroke = 1) +
+   scale_fill_manual(values = c("#A7C084", "white"),
+                     labels = c("Lower bound of fitness difference\nestimate is greater than upper\nbound of stabilization estimate", "Confidence intervals of fitness\ndifference and stabilization\nestimates overlap"), name = "") + 
+  geom_errorbar(aes(ymin = (mean_fd)-2*sem_fd,
+                    ymax = (mean_fd)+2*sem_fd),
+                size = .35) +
+  geom_errorbarh(aes(xmin = mean_sd-2*sem_sd,
+                     xmax = mean_sd+2*sem_sd),
+                 size = .35) +
+  ggrepel::geom_text_repel(segment.size = 0.025, color = "#556B37", size = 6) +
+   xlab(bquote(atop("Microbially mediated stabilization",
+                    -frac(1,2)~(m["1A"]-m["1B"]-m["2A"]+m["2B"]) ))) +
+   ylab(bquote(atop("Microbially mediated fitness difference",
+                    frac(1,2)~(m["1A"]+m["1B"]-m["2A"]-m["2B"])))) + 
+   annotate("text", x = 0.5, y = 0.15, label = "coexistence", 
+            vjust = 0, hjust = 1, size = 10, fontface = "bold.italic") +
+   annotate("text", x = 0.5, y = 0.60, label = "exclusion", 
+            vjust = 0, hjust = 1, size = 10, fontface = "bold.italic") +
+   theme_gsk() +
+   theme(axis.line = element_line(size = 0),
+         legend.justification=c(1,0), legend.position=c(1, 0.025),
+         legend.background = element_rect(colour = "grey50"),
+         legend.key.height = unit(1, 'cm'),
+         legend.text = element_text(size = 7.5),
+         legend.title = element_text(size = 0)) +
+  theme(text = element_text(size = 20))+
+  coord_cartesian(xlim = c(-0.3, 0.8), ylim=c(-0.4, 0.7))
+   
+sd_fd_xpyplot
+```
+##### 3.  Using bootstrapping raw data to predicting coexsistence outcomes
+```{r, warning = FALSE,  message=FALSE}
+biomass_wide_st <- cbind(apply(biomass_wide[, -1], 2, FUN = function(x){mean(x, na.rm = T)}), apply(biomass_wide[, -1], 2, FUN = function(x){sd(x, na.rm = T)}))
+colnames(biomass_wide_st) <- c('mean', 'sd')
+
+#bootstrap
+n_reps <- 1000
+vec <- c()
+for (i in colnames(biomass_wide)[-1]){
+  set.seed(31415)
+  for (j in 1:1000){
+    vec <- c(vec, mean(sample((na.exclude(unlist(unname(as.vector(biomass_wide[, i]))))), 10, replace = T), na.rm = T))
+  }
+}
+mat <- matrix(vec, ncol = 24, nrow = n_reps, byrow = F)
+colnames(mat) <- colnames(biomass_wide)[-1]
+mat <- as.tibble(mat) %>% mutate(pair_id = 1:n_reps)
+
+# Calculate SD & FD
+stabilization_values_norm <- calculate_stabilization(mat)
+fd_values_norm <- calculate_fitdiffs(mat)
+
+# Use newly defined functions to calculate SD and FD
+SD_vec_by_species <- split(stabilization_values_norm, stabilization_values_norm$pair_id) %>% lapply(function(x) { x["pair_id"] <- NULL; x })
+FD_vec_by_species <- split(fd_values_norm, fd_values_norm$pair_id) %>% lapply(function(x) { x["pair_id"] <- NULL; x })
+
+SD_vec_by_run <- split(stabilization_values_norm, rownames(stabilization_values_norm)) %>% lapply(function(x) { x["pair_id"] <- NULL; x })
+FD_vec_by_run <- split(fd_values_norm, rownames(fd_values_norm)) %>% lapply(function(x) { x["pair_id"] <- NULL; x })
+
+compare <- function(FD_vec, SD_vec) {
+  exclusion <- sum(abs(FD_vec) > abs(SD_vec))
+  coexistence <- sum(abs(FD_vec) < SD_vec)
+  priority <- nrow(FD_vec)-(exclusion+coexistence)
+  return(c(n_reps_exclusion = exclusion, n_reps_coex = coexistence, 
+           n_reps_pes = priority))
+}
+outcomes_by_pair <- t(mapply(compare, FD_vec_by_species, SD_vec_by_species))
+outcomes_by_run <- t(mapply(compare, FD_vec_by_run, SD_vec_by_run))
+```
+
+Pie plot with all combination of decay categories.
+```{r, warning = FALSE,  message=FALSE}
+#Pie plot
+fd_values_st <- fd_values_norm %>% group_by(pair_id) %>% summarise( mean_FD = mean(fitdiff_fld))
+stabilization_values_st <- stabilization_values_norm %>% group_by(pair_id) %>% summarise(mean_SD = mean(stabilization))
+live_ref_sims <- outcomes_by_pair %>% cbind(stabilization_values_st,  fd_values_st) %>% select(-c(4, 6))
+
+# Make a base plot that can be modified for each sub question  
+base_coex_plot <- 
+  ggplot() +
+  geom_ribbon(aes(x = seq(0, 5, length.out = 100),
+                  ymin = rep(0, length.out = 100),
+                  ymax = seq(0, 5, length.out = 100)),
+              fill = alpha("#CAD9B5", 1)) + #99D594 d9ead3ff
+  geom_ribbon(aes(x = seq(0, -5, length.out = 100),
+                  ymin = rep(0, length.out = 100),
+                  ymax = seq(0, 5, length.out = 100)),
+              fill = alpha("#D3C1AB", 1)) +
+  annotate("segment", x = 0, y = 0, xend = 5, yend = 5, linetype = 2) +
+  annotate("segment", x = 0, y = 0, xend = -5, yend = 5, linetype = 2) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  xlab(bquote(atop("",
+                   -frac(1,2)~(m["1A"]-m["1B"]-m["2A"]+m["2B"]) ))) +
+  ylab(bquote(atop("Fitness difference",
+                   frac(1,2)~(m["1A"]+m["1B"]-m["2A"]-m["2B"])))) +
+  annotate("segment", x = 0.2, xend = 1.25, y = -.12, yend = -.12, 
+           colour = "grey25", size = 0.5, arrow = arrow(length = unit(0.075, "inches"))) + 
+  annotate("segment", x = -0.2, xend = -1.25, y = -.12, yend = -.12, 
+           colour = "grey25", size = 0.5, arrow = arrow(length = unit(0.075, "inches"))) +
+  theme(axis.line = element_blank())
+
+# define the data range of the plot
+x_min <- with(live_ref_sims, min(mean_SD))-0.25
+x_max <- with(live_ref_sims, max(mean_SD))+0.1
+y_min <- with(live_ref_sims, min(abs(mean_FD)))-0.05
+y_max <- with(live_ref_sims, max(abs(mean_FD)))+0.15
+
+# adapt a previously defined base plot
+base_coex_plot1 <- base_coex_plot
+base_coex_plot1$layers[7:8] <- NULL
+base_coex_plot1 <- base_coex_plot1 +   
+  annotate("text", x = 0.1, y = -0.03, hjust = 0, vjust = 0, label = "Stabilization", color = "black", size = 4.8) +
+  annotate("text", x = -0.01, y = -0.03, hjust = 1, vjust = 0, label = "Destabilization",  color = "black", size = 4.8) + 
+  theme(axis.title.x = element_text(margin = margin(t = 0)))
+# base_coex_plot1
+
+# plotting
+scatterpie <- base_coex_plot1 +
+    scale_x_continuous(limits = c(x_min, x_max)) +
+    scale_y_continuous(limits = c(y_min-0.05, y_max)) +
+    annotate("segment", x = 0, y = 0, xend =  min(x_max, y_max),
+             yend = min(x_max, y_max), 
+             linetype = 2) +
+    annotate("segment", x = 0, y = 0, xend =  max(x_min, -y_max),
+             yend =  min(-x_min, y_max),
+             linetype = 2) +
+    geom_scatterpie(aes(x=mean_SD, y=abs(mean_FD), r = 0.015), 
+                    data=live_ref_sims, size = 0.15,
+                    cols=c("n_reps_exclusion", "n_reps_coex", "n_reps_pes")) +
+    geom_text(aes(x=mean_SD, y=abs(mean_FD)+0.025, label = rownames(live_ref_sims)), data=live_ref_sims, size = 3)+
+    scale_fill_manual(values = c("#f1f4f9", "#ADC178", "#997B66"), labels =  c( "exclusion", "coexistence", "priority effect"), name = "") +
+    # guides(fill = "none") +
+    # labs(title = "(A) Species pairs with reference growth in live soil") + 
+    coord_fixed() +
+    theme(axis.line = element_line(size = 0),
+          legend.position = "bottom",
+          legend.background = element_rect(colour = "grey50", size = .3),
+          )
+```
+Pie plot with only three comcination of decay categories.
+
+```{r, warning = FALSE,  message=FALSE}
+#filter version
+live_ref_sims_fil <- live_ref_sims[c(1, 5, 9), ]
+rownames(live_ref_sims_fil) <- c("Alive E_Alive M", "Long decay E_Long Decay M", "Short decay E_Short decay M")
+
+# plotting
+scatterpie_FL <- base_coex_plot1 +
+    scale_x_continuous(limits = c(x_min, x_max)) +
+    scale_y_continuous(limits = c(y_min-0.05, y_max)) +
+    annotate("segment", x = 0, y = 0, xend =  min(x_max, y_max),
+             yend = min(x_max, y_max), 
+             linetype = 2) +
+    annotate("segment", x = 0, y = 0, xend =  max(x_min, -y_max),
+             yend =  min(-x_min, y_max),
+             linetype = 2) +
+    geom_scatterpie(aes(x=mean_SD, y=abs(mean_FD), r = 0.015), 
+                    data=live_ref_sims_fil, size = 0.15,
+                    cols=c("n_reps_exclusion", "n_reps_coex", "n_reps_pes")) +
+    geom_text(aes(x=mean_SD, y=abs(mean_FD)+0.025, label = rownames(live_ref_sims_fil)), data=live_ref_sims_fil, size = 3)+
+    scale_fill_manual(values = c("#f1f4f9", "#ADC178", "#997B66"), labels =  c( "exclusion", "coexistence", "priority effect"), name = "") +
+    # guides(fill = "none") +
+    # labs(title = "(A) Species pairs with reference growth in live soil") + 
+    coord_fixed() +
+    theme(axis.line = element_line(size = 0),
+          legend.position = "bottom",
+          legend.background = element_rect(colour = "grey50", size = .3),
+          )
+scatterpie_FL
+```
+
+Cloud plot with only three comcination of decay categories.
+```{r, warning = FALSE,  message=FALSE}
+#Extracting the pairs
+MCT_plot_mat <- stabilization_values_norm %>% filter(pair_id %in% c("freshE_freshM", "shortdE_shortdM", "longdE_longdM")) %>% cbind(fd_values_norm %>% filter(pair_id %in% c("freshE_freshM", "shortdE_shortdM", "longdE_longdM")) %>% select(-"pair_id"))
+
+#Plotting
+ggplot() +
+  geom_ribbon(aes(x = seq(0, 5, length.out = 100),
+                  ymin = seq(0, -5, length.out = 100),
+                  ymax = seq(0, 5, length.out = 100)),
+              fill = alpha("#CAD9B5", 1)) + #99D594 d9ead3ff
+  geom_ribbon(aes(x = seq(0, -5, length.out = 100),
+                  ymin = seq(0, -5, length.out = 100),
+                  ymax = seq(0, 5, length.out = 100)),
+              fill = alpha("#D3C1AB", 1)) +
+  
+  annotate("segment", x = 0, y = 0, xend = 5, yend = 5, linetype = 2) +
+  annotate("segment", x = 0, y = 0, xend = 5, yend = -5, linetype = 2) +
+  annotate("segment", x = 0, y = 0, xend = -5, yend = 5, linetype = 2) +
+  annotate("segment", x = 0, y = 0, xend = -5, yend = -5, linetype = 2) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  xlab(bquote(atop("",
+                   -frac(1,2)~(m["1A"]-m["1B"]-m["2A"]+m["2B"]) ))) +
+  ylab(bquote(atop("Fitness difference",
+                   frac(1,2)~(m["1A"]+m["1B"]-m["2A"]-m["2B"])))) +
+  annotate("text", x = 0.2, y = -Inf, hjust = 0, vjust = 0, label = "Stabilization", color = "black", size = 4) +
+  annotate("text", x = -0.1, y = -Inf, hjust = 1, vjust = 0, label = "Destabilization",  color = "black", size = 4) +
+  annotate("segment", x = 0.01, xend = 0.1, y = -.005, yend = -.005, 
+           colour = "grey25", size = 0.5, arrow = arrow(length = unit(0.075, "inches"))) + 
+  annotate("segment", x = -0.01, xend = -0.1, y = -.005, yend = -.005, 
+           colour = "grey25", size = 0.5, arrow = arrow(length = unit(0.075, "inches"))) +
+  # theme_plots() + 
+  theme(axis.line = element_blank()) +
+  geom_point(data = MCT_plot_mat,
+              aes(x = stabilization,
+                  y = fitdiff_fld, col = pair_id),
+              show.legend = T,
+              size = 2, stroke = 1,
+              shape = 21, alpha = 0.6) +
+  scale_color_manual(values=c("#ADC178", "#F1DCA7", "#997B66"), "Pair", labels = c("Alive E_Alive M", "Long decay E_Long decay M", "Short decay E_Short decay M"))+
+  coord_cartesian(xlim = range(MCT_plot_mat$stabilization), ylim = range(MCT_plot_mat$fitdiff_fld))
+```
+
+```{r, warning = FALSE,  message=FALSE, class.source = 'fold-hide'}
+#Saving scatterpie with only three pairs 
+# png(file="/Users/yupeitseng/Documents/RA/FS_PSF/plots/Figure_Outcome.png",
+# width=1200, height=800)
+# scatterpie_FL+theme(text = element_text(size = 30))
+# dev.off()
+```
+
+##### 3. Sampling from normal distribution constructed by raw data to predicting coexsistence outcomes
+```{r, warning = FALSE,  message=FALSE}
+biomass_wide_st <- cbind(apply(biomass_wide[, -1], 2, FUN = function(x){mean(x, na.rm = T)}), apply(biomass_wide[, -1], 2, FUN = function(x){sd(x, na.rm = T)}))
+colnames(biomass_wide_st) <- c('mean', 'sd')
+
+#rnorm
+biomass_wide_st <- cbind(apply(biomass_wide[, -1], 2, FUN = function(x){mean(x, na.rm = T)}), apply(biomass_wide[, -1], 2, FUN = function(x){sd(x, na.rm = T)}))
+colnames(biomass_wide_st) <- c('mean', 'sd')
+rownames(biomass_wide_st)
+
+n_reps <- 1000
+vec <- c()
+for(i in rownames(biomass_wide_st)){
+  set.seed(31415)
+  vec <- c(vec, rnorm(n_reps, mean = biomass_wide_st[i, 1], 
+        sd = biomass_wide_st[i, 2]))
+}
+mat <- matrix(vec, ncol = 24, nrow = n_reps, byrow = F)
+colnames(mat) <- rownames(biomass_wide_st)
+mat <- as.tibble(mat) %>% mutate(pair_id = 1:n_reps)
+
+# Calculate SD & FD
+stabilization_values_norm <- calculate_stabilization(mat)
+fd_values_norm <- calculate_fitdiffs(mat)
+
+# Use newly defined functions to calculate SD and FD
+SD_vec_by_species <- split(stabilization_values_norm, stabilization_values_norm$pair_id) %>% lapply(function(x) { x["pair_id"] <- NULL; x })
+FD_vec_by_species <- split(fd_values_norm, fd_values_norm$pair_id) %>% lapply(function(x) { x["pair_id"] <- NULL; x })
+
+SD_vec_by_run <- split(stabilization_values_norm, rownames(stabilization_values_norm)) %>% lapply(function(x) { x["pair_id"] <- NULL; x })
+FD_vec_by_run <- split(fd_values_norm, rownames(fd_values_norm)) %>% lapply(function(x) { x["pair_id"] <- NULL; x })
+
+outcomes_by_pair <- t(mapply(compare, FD_vec_by_species, SD_vec_by_species))
+outcomes_by_run <- t(mapply(compare, FD_vec_by_run, SD_vec_by_run))
+```
+
+Pie plot with all combination of decay categories.
+```{r, warning = FALSE,  message=FALSE}
+#Pie plot
+fd_values_st <- fd_values_norm %>% group_by(pair_id) %>% summarise( mean_FD = mean(fitdiff_fld))
+stabilization_values_st <- stabilization_values_norm %>% group_by(pair_id) %>% summarise(mean_SD = mean(stabilization))
+live_ref_sims <- outcomes_by_pair %>% cbind(stabilization_values_st,  fd_values_st) %>% select(-c(4, 6))
+
+# define the data range of the plot
+x_min <- with(live_ref_sims, min(mean_SD))-0.25
+x_max <- with(live_ref_sims, max(mean_SD))+0.1
+y_min <- with(live_ref_sims, min(abs(mean_FD)))-0.05
+y_max <- with(live_ref_sims, max(abs(mean_FD)))+0.15
+
+# plotting
+base_coex_plot1 +
+    scale_x_continuous(limits = c(x_min, x_max)) +
+    scale_y_continuous(limits = c(y_min-0.05, y_max)) +
+    annotate("segment", x = 0, y = 0, xend =  min(x_max, y_max),
+             yend = min(x_max, y_max), 
+             linetype = 2) +
+    annotate("segment", x = 0, y = 0, xend =  max(x_min, -y_max),
+             yend =  min(-x_min, y_max),
+             linetype = 2) +
+    geom_scatterpie(aes(x=mean_SD, y=abs(mean_FD), r = 0.015), 
+                    data=live_ref_sims, size = 0.15,
+                    cols=c("n_reps_exclusion", "n_reps_coex", "n_reps_pes")) +
+    geom_text(aes(x=mean_SD, y=abs(mean_FD)+0.025, label = rownames(live_ref_sims)), data=live_ref_sims, size = 3)+
+    scale_fill_manual(values = c("#f1f4f9", "#ADC178", "#997B66"), labels =  c( "exclusion", "coexistence", "priority effect"), name = "") +
+    # guides(fill = "none") +
+    # labs(title = "(A) Species pairs with reference growth in live soil") + 
+    coord_fixed() +
+    theme(axis.line = element_line(size = 0),
+          legend.position = "bottom",
+          legend.background = element_rect(colour = "grey50", size = .3),
+          )
+```
