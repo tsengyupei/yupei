@@ -1,0 +1,15 @@
+,Estimate,Pr(>|t|),Estimate,Pr(>|t|),Estimate,Pr(>|t|),Estimate,Pr(>|t|)
+,Pathotroph,,Pathotroph-Saprotroph,,Pathotroph-Saprotroph-Symbiotroph,,Pathotroph-Symbiotroph,
+layerM,-,0.148,-,0.427,-,0.293,-,0.380
+layerO,-,0.011,-,0.932,-0.159,0.017,-,0.420
+layerU,-,0.026,-,0.404,-0.123,0.066,-,0.581
+log10(Dry mass),-,0.334,0.137,0.099,-,0.117,-,0.345
+scale(pH),-,0.183,0.058,0.015,0.042,0.090,-,0.116
+scale(C_N),-,0.643,-,0.834,-,0.954,-,0.917
+,Saprotroph,,Saprotroph-Symbiotroph,,Symbiotroph,,All,
+layerM,-,0.418,-,0.676,-,0.755,-,0.888
+layerO,-,0.673,-,0.947,-,0.157,-,0.740
+layerU,-,0.585,-,0.763,-,0.348,-,0.955
+log10(Dry mass),-,0.299,-,0.971,-,0.179,-,0.380
+scale(pH),-,0.150,-,0.200,-0.117,0.091,0.573,0.018
+scale(C_N),-,0.796,-,0.759,-,0.661,-,0.177
