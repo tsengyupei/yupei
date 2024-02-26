@@ -1,1 +1,2 @@
-Slides for all presentation, including meeting and conference.
+Slides for all presentations, including meetings and conferences.
+In MEGA!
